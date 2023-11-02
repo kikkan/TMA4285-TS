@@ -1,3 +1,7 @@
+# Want to ignore something? See the link
+# https://github.com/kenmueller/gitignore
+
+
 # History files
 .Rhistory
 .Rapp.history

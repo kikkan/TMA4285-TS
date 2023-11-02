@@ -1,0 +1,66 @@
+---
+title: "Title"
+author: "Christian Oppegård Moen"
+date: "dd-mm-yyyy"
+output: 
+  bookdown::pdf_document2:
+    toc_depth: '3' # Depth of contents
+    number_sections: false
+  # pdf_document:
+  # #   toc: no
+  #   toc_depth: '3'
+subtitle: code - courseName
+urlcolor: blue
+editor_options: 
+  chunk_output_type: console
+header-includes:
+- \usepackage[width=0.8\textwidth]{caption} # add caption to figures.
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+  echo = T, tidy=T, message=F, warning=F,
+  strip.white=F, # Strips whitespace
+  prompt=F, #?
+  cache=T, # Cache for quick knit.
+  # root.dir = "./subfolder",
+  size="scriptsize",
+  fig.width=7, 
+  fig.height=5, 
+  fig.align = "center"
+)
+```
+
+```{r config, include=F}
+if (F){
+  setwd("C:\Users") # Might wanna change this
+  options(error=recover)
+  options(error=NULL)
+  par(mar=c(5,4,4,2)+0.1) # default margins
+}
+defaultMargins = c(5,4,4,2)+0.1 # default margins
+figPath = "./figures/"
+```
+
+```{r packages, include = F}
+library(readr)
+library(lubridate)
+```
+
+# Data
+Just to create a figure such that the figures directory appears in the github repo.
+```{r data, options}
+pd <- read_csv("projectdataFormated.csv")
+head(pd)
+typeof(pd)
+pd$Month = as.Date(paste0(sub("M", "-", pd$Month), "-01"), format = "%Y-%m-%d")
+head(pd)
+```
+
+```{r plot, options}
+pdf(paste0(figPath, "feltCute_mightDeleteLater.pdf"))
+plot(pd$Month, pd$Inflation)
+dev.off()
+```
+
