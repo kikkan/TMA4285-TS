@@ -1,0 +1,183 @@
+---
+title: "An overview of the data and some intuition wich possibly is way off"
+author: "Christian Oppegård Moen"
+date: "dd-mm-yyyy"
+output: 
+  bookdown::pdf_document2:
+    toc_depth: '3' # Depth of contents
+    number_sections: false
+  # pdf_document:
+  # #   toc: no
+  #   toc_depth: '3'
+subtitle: TMA4285 - Time Series
+urlcolor: blue
+editor_options: 
+  chunk_output_type: console
+header-includes:
+- \usepackage[width=0.8\textwidth]{caption} # add caption to figures.
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+  echo = T, tidy=T, message=F, warning=F,
+  strip.white=F, # Strips whitespace
+  prompt=F, #?
+  cache=T, # Cache for quick knit.
+  # root.dir = "./subfolder",
+  size="scriptsize",
+  fig.width=7, 
+  fig.height=5, 
+  fig.align = "center"
+)
+```
+
+```{r config, include=F}
+if (F){
+  # setwd("C:\Users\kikka\AppData\Local\R\win-library\4.2\rmarkdown\rmarkdown\templates\project2023_christian\skeleton") # Location for the skeleton. Might wanna change this
+  options(error=recover)
+  options(error=NULL)
+  par(mar=c(5,4,4,2)+0.1) # default margins
+}
+defaultMargins = par(mar=c(5,4,4,2)+0.1) # default margins
+```
+
+```{r packages, include=F}
+library(readr)
+library(ggplot2)
+library(nlme) # To get season slopes
+library(lubridate)
+library(Rmisc)
+library(moments) # Skewness test
+library(astsa)
+```
+
+# Task
+Model inflation rate along with three covariates of our choosing.
+
+# Exploratory Data Analysis (EDA)
+Import data and format date.
+```{r data, options}
+pd <- read_csv("projectdataFormated.csv")
+typeof(pd)
+pd$Month = as.Date(paste0(sub("M", "-", pd$Month), "-01"), format = "%Y-%m-%d")
+head(pd)
+```
+
+## Inflation overview
+Inflation over time:
+
+```{r inflationSeason, fig.cap="Inflation over time colored according to the four seasons. The colouerd lines are 'loess' fitted curves per season."}
+pd$MonthInt = as.integer(format(pd$Month, "%m"))
+pd$Season <- ifelse(month(pd$Month) %in% c(12, 1, 2), "Winter",
+                   ifelse(month(pd$Month) %in% c(3, 4, 5), "Spring",
+                   ifelse(month(pd$Month) %in% c(6, 7, 8), "Summer", "Autumn")))
+
+# Season colored plot with 'loess' fitted curves ----
+ggInflation = ggplot(pd, aes(x = Month, y = Inflation))+
+  geom_point(aes(col = Season)) +
+  geom_line(linetype = 1, lwd =0.5) +
+  geom_smooth(aes(col=Season), se=F)+
+  theme_minimal()
+ggInflation
+```
+In Figure \@ref(fig:inflationSeason) the data seem normal, with timely changes in variation.
+There is not much evidence of any trends related to the four seasons. It seems like summer follow spring with a slight delay, suggesting that it could be beneficial to combine these two seasons.
+
+```{r inflationHist, fig.cap="Histogram of inflation along with a normal curve of the sample mean and variance."}
+mu <- mean(pd$Inflation)
+sigma <- sd(pd$Inflation)
+hist(pd$Inflation, breaks = 20, prob = TRUE, main = "Histogram with Normal Density Curve",
+     xlab = "Values", ylab = "Density")
+curve(dnorm(x, mean = mu, sd = sigma), col = "cyan", lwd = 1, add = TRUE)
+```
+The histogram in Figure \@ref(fig:inflationHist) also suggest normality. It also shows evidence of positive skewedness. The skewedness is significant per D'Agostino test. (Dunno much about this test. Guess we wont use it anyways.)
+
+```{r agostino, options}
+agostino.test(pd$Inflation)
+```
+
+```{r inflationPerSeasonTrend, fig.cap="Linear fit to each season."}
+t = rep(1,10)
+for (i in 2:15){
+  t = c(t, rep(i, 12))
+}
+t = c(t, 16)
+pd$SeasonCount = paste0(pd$Season, t)
+
+ggInflationSeason = ggplot(pd, aes(x = Month, y = Inflation, col=Season))+
+  geom_point() + 
+  stat_smooth(aes(fill=SeasonCount), method = "lm", se=F, show.legend=F, lwd=0.5)+
+  theme_minimal()
+ggInflationSeason
+```
+It is somewhat difficult to see any trends per season in Figure \@ref(fig:inflationPerSeasonTrend), so we compute some values below and show the slopes in a Boxplot.
+
+```{r inflationTrends, options}
+# Find season slopes ----
+seasonSlopes = coef(lmList(Inflation~Month|SeasonCount, data = pd))["Month"]
+seasons = unique(pd$Season)
+
+seasonTrends = data.frame(row.names = c("mean", "var"))
+seasonSlopes2 = list()
+for (s in seasons){
+  st = na.omit(seasonSlopes$Month[startsWith(rownames(seasonSlopes), s)])
+  seasonSlopes2[[s]] = st
+  seasonTrends[[s]] = c(mean(st), var(st))
+}
+seasonTrends
+```
+
+```{r inflationBox, fig.cap="Boxplot of the slopes of inflation per season. Confidence interval and mean for Autumn is shown by dashed grey lines."}
+boxplot(seasonSlopes2, notch = T)
+abline(h=0, lty=2)
+# abline(h=seasonTrends['mean', "Winter"])
+abline(h=CI(seasonSlopes2$Autumn, ci=0.95), lty = 2, col="gray")
+```
+
+Figure \@ref(fig:inflationBox) suggest that Autumn is significantly negative. That is, there is a significant decrease in inflation during the Autumn. Notches say that it is significantly different from the other seasons. Why negative inflation in the autumn tho? Saving money for the holidays?
+
+
+
+## Inflation Time Series
+
+Let's look at acf, pacf and so on.
+
+```{r temp, fig.cap="ACF and PACF of inflation compared to a samesized sample of normal data."}
+set.seed(420)
+par(mfrow=c(2,2))
+normalData = rnorm(dim(pd)[1])
+acf(pd$Inflation, lag.max = 25)
+pacf(pd$Inflation, lag.max = 25)
+acf(normalData, lag.max = 25)
+pacf(normalData, lag.max = 25)
+```
+ACF show somewhat cut off immediately, but we notice the significant 4, 12 and 24 lag.
+
+PACF show that the 4, 8, 12, 13 and 24 lag is significant.
+
+# Covariate/Model selection
+Not much to go on but the normality shown in figure \@ref(fig:inflationHist). Suppose the inflation can be model as a regression with autocorrelated errors. Namely,
+\begin{equation}
+  Y_t = \sum_{i=1}^r \beta_i z_{ti} + x_t, 
+\end{equation}
+where $x_t$ has some covariance structure $\gamma_x(s,t)$, e.g., ARMA, $z_{ti}$ is (unknown?) covariate $i$ at time $t$ and $\beta_i$ are cofficients. In OLS we assume that the noise is Gaussian, that is, $\gamma_x(s,t) = \sigma_x^2$ for $s=t$, else zero. That is, the temporal $x_t$ captures the stationary process, but not the variance variation we discussed earlier(?). More on this in Shumway & Stoffer ch. 3.8 p.143.
+
+Assuming that the covariates are known, we can standardize the variance by multiplying by the root of the covariance matrix. Then we get the standardized (not centralized) equation
+\begin{equation}
+  \boldsymbol{y}^* = \mathbf{Z}^* \boldsymbol{\beta} + \boldsymbol{\delta},
+\end{equation}
+where $\boldsymbol{y}^*  = \mathbf{\Gamma}^{-1/2} \boldsymbol{y}$, $\mathbf{Z}^* = \mathbf{\Gamma}^{-1/2} \mathbf{Z}$, blablabla...
+Since we are in OLS territory we want to write it in matrix notation to make coefficient estimation neat and familiar by the hat-matrix. Let's try by following r code on page 144. What sarima tho, perhaps $(1,0,0)\times (P=?, D=?, Q=?)_{12}$
+
+\textcolor{red}{Needs more work!}
+```{r Sarima, options}
+summary(fit <- lm(Inflation~Unemployed + Bankrupt + Consumption, data = pd)) # dayum, inline variable assignment
+acf2(resid(fit), 24)
+# sarima: Seasonal components: P, D, Q, S = SAR order, seasonal diff., SMA order
+sarima(pd$Inflation, 1,0,0, S=12, xreg = cbind(Unemp = pd$Unemployed, Bankr = pd$Bankrupt, Cons = pd$Consumption))
+```
+
+
+# Future work
+Tenke at Garch can vær iteressant da æ synes at d ikke e ufornuftig med litt varians analyse basert på plot \@ref(inflationSeason)
