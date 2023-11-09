@@ -87,8 +87,7 @@ There is not much evidence of any trends related to the four seasons. It seems l
 ```{r inflationHist, fig.cap="Histogram of inflation along with a normal curve of the sample mean and variance."}
 mu <- mean(pd$Inflation)
 sigma <- sd(pd$Inflation)
-hist(pd$Inflation, breaks = 20, prob = TRUE, main = "Histogram with Normal Density Curve",
-     xlab = "Values", ylab = "Density")
+hist(pd$Inflation, breaks = 20, prob = TRUE, xlab = "Values", ylab = "Density")
 curve(dnorm(x, mean = mu, sd = sigma), col = "cyan", lwd = 1, add = TRUE)
 ```
 The histogram in Figure \@ref(fig:inflationHist) also suggest normality. It also shows evidence of positive skewedness. The skewedness is significant per D'Agostino test. (Dunno much about this test. Guess we wont use it anyways.)
