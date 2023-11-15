@@ -1,0 +1,329 @@
+---
+title: "Title"
+author: "Christian Oppegård Moen"
+date: "dd-mm-yyyy"
+output: 
+  bookdown::pdf_document2:
+    toc_depth: '3' # Depth of contents
+    number_sections: false
+  # pdf_document:
+  # #   toc: no
+  #   toc_depth: '3'
+subtitle: code - courseName
+urlcolor: blue
+editor_options: 
+  chunk_output_type: console
+header-includes:
+- \usepackage[width=0.8\textwidth]{caption} # add caption to figures.
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+  echo = T, tidy=T, message=F, warning=F,
+  strip.white=F, # Strips whitespace
+  prompt=F, #?
+  cache=T, # Cache for quick knit.
+  # root.dir = "./subfolder",
+  size="scriptsize",
+  fig.width=7, 
+  fig.height=5, 
+  fig.align = "center"
+)
+```
+
+```{r config, include=F}
+if (F){
+  options(error=recover)
+  options(error=NULL)
+  par(mar=c(5,4,4,2)+0.1) # default margins
+}
+defaultMargins = par(mar=c(5,4,4,2)+0.1) # default margins
+```
+
+
+\newpage
+```{r libraries, options}
+source("chrisFunctions.r")
+library(ggplot2)
+```
+
+# GARCH
+GARCH($p$, $q$) is given by
+\begin{align}
+     r_t &= \sigma_t \epsilon_t, \label{eq:garchReturn}\\
+     \sigma^2_t &= \alpha_0 + \sum_{j=1}^p \alpha_j r_{t-j}^2 + \sum_{j=1}^q \beta_j \sigma_{t-j}^2. \label{eq:garchVar}
+\end{align}
+
+It can be shown that a GARCH($p$, $q$) admits a non-Gaussian ARMA($p$, $q$) for the squared process
+\begin{equation}
+  r_t^2
+\end{equation}
+
+
+
+```{r loadData, include=F}
+df <- read.csv('projectdata.csv', header = T, sep=";", dec=",", stringsAsFactors=FALSE)
+# head(df)
+```
+
+# acf and pacf
+For fun we consider the simple acf and pacf of the difference
+\begin{equation*}
+  \nabla x_t = x_t - x_{t-1}
+\end{equation*}
+```{r simpleDiff, fig.cap="Manual to the left and built-in to the right"}
+d = diff(df$Inflation)
+par(mfrow=c(2,2))
+dacf = sampleAcf(d,22)
+dacf2 = acf(d)
+
+dpacf = samplePacf(d, 22)
+dpacf2 = pacf(d)
+```
+
+Now let's look at the return
+\begin{equation}\label{eq:squaredDiff}
+  \nabla r_t = \frac{x_t - x_{t-1}}{x_{t-1}}.
+\end{equation}
+Problem: Some values are zero. Let's make sure that they are not. (Should not matter since we are looking at variance, right?)
+```{r return, fig.cap = "Return"}
+n = dim(df)[1]
+shift = min(df$Inflation - 0.1)
+inflationShifted = df$Inflation - shift
+r = diff(inflationShifted)/inflationShifted[1:(n-1)]
+par(mfrow=c(1,2))
+dacf = sampleAcf(r,22)
+
+dpacf = samplePacf(r, 22)
+```
+
+Finally, let's consider the squared return, which is supposed to be ARMA(p,q)
+```{r sqReturn, fig.cap="Squared return"}
+par(mfrow=c(1,2))
+dacf = sampleAcf(r^2,22)
+
+dpacf = samplePacf(r^2, 22) # Verified with pacf fnc.
+```
+
+\begin{equation}
+\begin{array}{l}
+\text { Table 3.1. Behavior of the ACF and PACF for ARMA models }\\
+\begin{array}{cccc}
+\hline \hline & \operatorname{AR}(p) & \operatorname{MA}(q) & \operatorname{ARMA}(p, q) \\
+\hline \text { ACF } & \text { Tails off } & \begin{array}{c}
+\text { Cuts off } \\
+\text { after lag } q
+\end{array} & \text { Tails off } \\
+\text { PACF } & \begin{array}{c}
+\text { Cuts off } \\
+\text { after lag } p
+\end{array} & \text { Tails off } & \text { Tails off } \\
+\hline
+\end{array}
+\end{array}
+\end{equation}
+
+
+
+<!-- ```{r gptAns, options} -->
+<!-- # Function to fit GARCH(p, q) model without using non-base libraries -->
+<!-- fit_garch <- function(data, p, q, omega_init, alpha_init, beta_init) { -->
+<!--   # Length of the data -->
+<!--   n <- length(data) -->
+
+<!--   # Initialize parameters -->
+<!--   omega <- omega_init -->
+<!--   alpha <- alpha_init -->
+<!--   beta <- beta_init -->
+
+<!--   # Initialize arrays to store the squared returns and conditional variances -->
+<!--   h <- numeric(n) -->
+<!--   epsilon_squared <- numeric(n) -->
+
+<!--   # Calculate squared returns and initialize conditional variances -->
+<!--   epsilon_squared[1:(p + q)] <- data[1:(p + q)]^2 -->
+<!--   h[1:(p + q)] <- mean(epsilon_squared[1:(p + q)]) -->
+
+<!--   # Main loop to estimate parameters and conditional variances -->
+<!--   for (t in (p + q + 1):n) { -->
+<!--     # Estimate conditional variance using GARCH(p, q) model -->
+<!--     h[t] <- omega + sum(alpha * epsilon_squared[(t - p):(t - 1)] + beta * h[(t - q):(t - 1)]) -->
+
+<!--     # Calculate the squared return at time t -->
+<!--     epsilon_squared[t] <- data[t]^2 -->
+<!--   } -->
+
+<!--   # Return the estimated parameters and conditional variances -->
+<!--   result <- list(omega = omega, alpha = alpha, beta = beta, conditional_variances = h) -->
+<!--   return(result) -->
+<!-- } -->
+
+<!-- # Example usage: -->
+<!-- # Replace 'your_data' with your actual time series data -->
+<!-- data <- df$inflation -->
+<!-- # Replace p, q, omega_init, alpha_init, beta_init with your desired values -->
+<!-- result <- fit_garch(data, p = 1, q = 1, omega_init = 0.01, alpha_init = 0.2, beta_init = 0.3) -->
+
+<!-- ``` -->
+
+# GARCH(p,q) Implementation
+Definitions for notational purposes:
+\begin{itemize}
+  \item $\mathcal{R}_1=(r_1,...,r_{max(p,q)})$
+  \item $\mathcal{R}_2=(r_t,...,r_{t+max(p,q)})$
+  \item $\boldsymbol \alpha=(\alpha_0,...,\alpha_p)$ 
+  \item $\boldsymbol \beta = (\beta_1,...,\beta_q)$
+  \item $\boldsymbol r_{tp} = (1, r_{t-1}, ..., r_{t-p})^\top$ 
+  \item $\sigma_{tq}^2 = (\sigma_{t-1}^2,...,\sigma_{t-q}^p)^\top$
+\end{itemize}
+
+It can be shown that $r_t|\mathcal{R}_2\sim \mathcal{N}(0, \sigma_t^2)$, $\mathcal{R}_2=(r_t,...,r_{t+max(p,q)})$. Because of the normality of the conditional return we can find MLE of $\boldsymbol \alpha$ and $\boldsymbol \beta$ parameters. That is, the likelihood to be maximized is given by
+
+
+ \begin{align}
+     L(\boldsymbol \alpha, \boldsymbol \beta | \mathcal{R}_1) &= \prod_{t = \max(p,q)+1}^n f_{\boldsymbol \alpha, \boldsymbol \beta}(r_t|\mathcal{R}_2) \nonumber \\
+     &=\prod_{t = \max(p,q)+1}^n (2\pi \sigma_t^2)^{-1/2} \exp(-\frac{1}{2} \frac{r_t^2}{\sigma_t^2}),
+ \end{align}
+ 
+ where $\mathcal{R}_1=(r_1,...,r_{max(p,q)})$ and $\sigma_t^2$ is given by equation \eqref{eq:garchVar}. We define the criterion function $l$ to be minimized as proportional to $-\ln L$, such that
+ 
+ \begin{align}
+     l(\boldsymbol \alpha, \boldsymbol \beta|\mathcal{R}_1) &= \sum_{t = \max(p,q)+1}^n \ln(\sigma_t^2) + \frac{r_t^2}{\sigma_t^2} \nonumber \\
+     &= \sum_{t = \max(p,q)+1}^n \ln (\alpha_0 + \sum_{j=1}^p \alpha_j r_{t-j}^2 + \sum_{j=1}^q \beta_j \sigma_{t-j}^2) + \frac{r_t^2}{\alpha_0 + \sum_{j=1}^p \alpha_j r_{t-j}^2 + \sum_{j=1}^q \beta_j \sigma_{t-j}^2} \nonumber \\
+     &=  \sum_{t = \max(p,q)+1}^n \ln(\boldsymbol \alpha \boldsymbol r_{tp} + \boldsymbol \beta \boldsymbol \sigma_{tq}^2) + \frac{r_t^2}{\boldsymbol \alpha \boldsymbol r_{tp} + \boldsymbol \beta \boldsymbol \sigma_{tq}^2},
+ \end{align}
+ 
+ where $\boldsymbol r_{tp} = (1, r_{t-1}, ..., r_{t-p})^\top$ and $\sigma_{tq}^2 = (\sigma_{t-1}^2,...,\sigma_{t-q}^p)^\top$
+
+
+
+```{r garch(pq), options}
+critFunc = function(params, r, p=1, q=1){
+  # LogLike of alpha and beta given the first r_t values t=(1,..., max(p,q))(Eq. 5.46)
+  # Defaults to GARCH(1,1) and uses only the first three params (alpha0, alpha1, beta1)
+  # params: vector of parameters. First p+1 are alphas, rest are betas
+  # r: vector of returns (Eq. 5.34)
+  # p,q: GARCH(p,q) model parameters
+  
+  n = length(r)
+  m = max(p,q)
+  
+  # If else statements in case it is not "generalized" (ARCH(p))
+  if (p == 0){
+    # Prolly not needed, never gonna remove the AR part?
+    alpha = c(0)
+    p=1
+  }
+  else {alpha = params[1:(p+1)]}
+  if (q == 0){
+    beta = c(0)
+    q = 1
+  }
+  else {beta = params[(p+2):(1+p+q)]}
+  
+  # Initialize first m conditional variances.
+  # TODO: This is not correct initialization of the first sigma[1:m], but it works for now.
+  sigma = numeric(n)
+  sigma[1:m] = (r[1:m]^2)
+  
+  ll = 0 # log likelihood (objective is to minimize this)
+  for (t in (m+1):n){
+    sigma[t] = t(alpha) %*% c(1,r[(t-1):(t-p)]^2) + t(beta) %*% sigma[(t-1):(t-q)]
+    ll = ll + log(sigma[t]) + r[t]^2/(sigma[t])
+  }
+  return(ll)
+}
+
+# r shifted ----
+# Shifting inflation since r (eq. 5.34) cannot have zeroes in the denominator.
+set.seed(420) # Why? don't ask me
+shift = min(df$Inflation - 0.1) # inflation seems to be discretized per 0.1
+inflationShifted = df$Inflation - shift
+r = diff(inflationShifted)/inflationShifted[1:(n-1)]
+
+# Test garch(1,2) ----
+alpha_init = c(0.1,0.1)
+beta_init = c(0.1,0.1)
+p = length(alpha_init)-1
+q = length(beta_init)
+loglike = critFunc(c(alpha_init, beta_init), r, p=p, q=q)
+opt = optim(par=c(alpha_init, beta_init), fn=critFunc, r=r, p=p, q=q)
+alpha = opt$par[1:(p+1)]
+beta = opt$par[(p+2):(1+p+q)]
+cbind(alpha, beta)
+
+# Sigma estimation ----
+sigmaForecast = function(alpha, beta, r){
+  # One-step-ahead forecasts of the volatility sigma (Eq. 5.52)
+  # alpha = (alpha_0,..., alpha_p): Estimated parameters by num. optim.
+  # beta = (beta_1,..., beta_q): Estimated parameters by num. optim.
+  # r: vector of returns.
+  
+  p = length(alpha) - 1
+  q = length(beta)
+  m = max(p,q)
+  
+  # Initialize first m conditional variances.
+  # TODO: This is not correct initialization of the first sigma[1:m], but it works for now.
+  sigma = numeric(n)
+  sigma[1:m] = (r[1:m]^2)
+  for (t in (m+1):n){
+    sigma[t] = t(alpha) %*% c(1,r[(t-1):(t-p)]^2) + t(beta) %*% sigma[(t-1):(t-q)]
+  }
+  return(sigma)
+}
+
+sigma_estim = sigmaForecast(alpha, beta, r)
+plot(r, type = 'l', )
+lines(sigma_estim[2:length(r)], col="cyan", lty=2)
+plot(df$Inflation, type = "l")
+```
+
+
+```{r arch1TestSample, options}
+alphas = c(0.3,0.7)
+p = length(alpha)-1
+n = 1e4
+rs = numeric(n) # r sample
+for (t in (p+1):n){
+  rs[t] = rnorm(1, sd=sqrt(t(alphas)%*%c(1,rs[(t-1):(t-p)]^2)))
+}
+optAlph = optim(par=c(0.1,0.1), fn=critFunc, r=rs, p=p, q=0)
+
+```
+
+```{r gptGarch22test, options}
+# Set GARCH(2,2) parameters
+p <- 2
+q <- 2
+omega <- 0.01
+alpha1 <- 0.2
+alpha2 <- 0.1
+beta1 <- 0.3
+beta2 <- 0.2
+
+# Set the length of the time series
+n <- 1e4
+
+# Initialize vectors to store simulated data
+returns <- numeric(n)
+conditional_variances <- numeric(n)
+
+# Set initial values
+returns[1:2] <- rnorm(2)
+conditional_variances[1:2] <- omega / (1 - alpha1 - alpha2 - beta1 - beta2)  # Ensure that it's a valid GARCH process
+
+# Simulate GARCH(2,2) process
+for (i in 3:n) {
+  epsilon <- rnorm(1)
+  conditional_variances[i] <- omega + alpha1 * returns[i-1]^2 + alpha2 * returns[i-2]^2 +
+                              beta1 * conditional_variances[i-1] + beta2 * conditional_variances[i-2]
+  returns[i] <- epsilon * sqrt(conditional_variances[i])
+}
+
+
+initParams = c(0.1,0.1,0.1,0.1,0.1)
+params = optim(par=c(0.1,0.1,0.1,0.1,0.1), fn=critFunc, r=returns, p=2, q=2, method = "BFGS")$par
+round(rbind(real = c(omega,alpha1,alpha2,beta1,beta2), estim = params, init = initParams),2)
+```
