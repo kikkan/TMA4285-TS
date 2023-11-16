@@ -1,0 +1,300 @@
+---
+title: "Title"
+author: "Christian Oppegård Moen"
+date: "dd-mm-yyyy"
+output: 
+  bookdown::pdf_document2:
+    toc_depth: '3' # Depth of contents
+    number_sections: false
+  # pdf_document:
+  # #   toc: no
+  #   toc_depth: '3'
+subtitle: code - courseName
+urlcolor: blue
+editor_options: 
+  chunk_output_type: console
+header-includes:
+- \usepackage[width=0.8\textwidth]{caption} # add caption to figures.
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(
+  echo = T, tidy=T, message=F, warning=F,
+  strip.white=F, # Strips whitespace
+  prompt=F, #?
+  cache=T, # Cache for quick knit.
+  # root.dir = "./subfolder",
+  size="scriptsize",
+  fig.width=7, 
+  fig.height=5, 
+  fig.align = "center"
+)
+```
+
+```{r config, include=F}
+if (F){
+  options(error=recover)
+  options(error=NULL)
+  par(mar=c(5,4,4,2)+0.1) # default margins
+}
+defaultMargins = par(mar=c(5,4,4,2)+0.1) # default margins
+```
+
+\newpage
+
+# GARCH(p,q) 
+Definitions for notational purposes:
+\begin{itemize}
+  \item $\mathcal{R}_1=(r_1,...,r_{max(p,q)})$
+  \item $\mathcal{R}_2=(r_t,...,r_{t+max(p,q)})$
+  \item $\boldsymbol \alpha=(\alpha_0,...,\alpha_p)$ 
+  \item $\boldsymbol \beta = (\beta_1,...,\beta_q)$
+  \item $\boldsymbol r_{tp} = (1, r_{t-1}, ..., r_{t-p})^\top$ 
+  \item $\boldsymbol \sigma_{tq}^2 = (\sigma_{t-1}^2,...,\sigma_{t-q}^p)^\top$
+\end{itemize}
+
+GARCH($p$, $q$) is given by
+\begin{align}
+     r_t &= \sigma_t \epsilon_t, \label{eq:garchReturn}\\
+     \sigma^2_t &= \alpha_0 + \sum_{j=1}^p \alpha_j r_{t-j}^2 + \sum_{j=1}^q \beta_j \sigma_{t-j}^2. \label{eq:garchVar}\\
+     \sigma_t^2 &= \boldsymbol \alpha \boldsymbol r_{tp}^2 + \boldsymbol \beta \boldsymbol \sigma_{tq}^2.
+\end{align}
+
+We know that $r_t|\mathcal{R}_2\sim \mathcal{N}(0, \sigma_t^2)$
+
+The log likelihood $l( \boldsymbol{\alpha}, \boldsymbol{\beta} | \mathcal{R}_1 ) \propto -\ln L(\boldsymbol{\alpha}, \boldsymbol{\beta} | \mathcal{R}_1 )$ is given by
+\begin{equation}
+  l( \boldsymbol{\alpha}, \boldsymbol{\beta} | \mathcal{R}_1 ) = \sum_{t=m+1}^n \ln(\sigma_t^2)) + \frac{r_t^2}{\sigma_t^2} 
+\end{equation}
+
+In the following chunk we implement the so called critical function.
+
+```{r critFunc, options}
+garchLL = function(params, r, p=1, q=0){
+  
+  n = length(r)
+  m = max(p,q)
+  
+  alpha = exp(params[1:(p+1)])
+  if (q==0){beta = 0}
+  else {beta = exp(params[-(1:(p+1))]) }
+  
+  # initialize variance and set first m values
+  sigma_sq = numeric(n)
+  sigma_sq[1:m] = t(alpha) %*% c(1,r[p:1]^2) # should they be zero?
+  # sigma_sq[1:m] = 0 # says so above eq. (5.52)
+  
+  # Iteratively compute each variance
+  for (t in (m+1):n){
+    sigma_sq[t] = sum(alpha * c(1,r[(t-1):(t-p)]^2)) + sum(beta*sigma_sq[(t-1):(t-q)]) 
+  }
+  ll = sum(log(sigma_sq) + r^2/sigma_sq)
+  return(ll)
+}
+```
+
+The variance $\sigma_t^2$ can be estimated by \textit{one-step-ahead} forecasting given by
+\begin{equation}
+  \hat\sigma_{t}^2 = \hat{\boldsymbol \alpha} \boldsymbol r_{tp}^2 + \hat{\boldsymbol \beta} \hat{\boldsymbol \sigma}_{tq}^2
+\end{equation}
+
+```{r sigmaForecast, options}
+sigmaForecast = function(mod){
+  n = mod$n
+  m = mod$m
+  p = mod$p
+  r = mod$r
+  
+  alpha = mod$estim[1:(p+1)]
+  if (mod$q==0){beta = 0; q=1} # If ARCH(p) model
+  else{beta = mod$estim[-(1:(p+1))]; q = mod$q}
+  
+  sf = numeric(n) # sigma squared forecasts
+  # sf[1:p] = sum(alpha*c(1,r[p:1]^2))
+  # sf[1:q] = 0
+  # sf[1:m] = alpha[1]/(1-sum(c(alpha, beta))) # GPT
+  sf[1:m] = sum(alpha*c(1,r[1:p]^2)) # used in sim test
+  
+  for (t in (m+1):n){
+    sf[t] = sum(alpha * c(1,r[(t-1):(t-p)]^2)) + sum(beta*sf[(t-1):(t-q)])
+    if(is.na(sf[t])){browser()}
+  }
+  return(sf)
+}
+
+# TODO: make garch function
+garch = function(r, p=1, q=0, init=c(0.1,0.1)){
+  n = length(r)
+  
+  alpha = init[1:(p+1)]
+  if (q==0){beta = 0; q=1} # If ARCH(p) model
+  else{beta = init[-(1:(p+1))]; q = q}
+  
+  estim = exp(optim(par = log(init), fn = garchLL, r = r, p=p, q=q, method = "BFGS")$par)
+  
+  mod = list(
+    p = p,
+    q = q,
+    n = n,
+    m = max(p,q),
+    init = init,
+    estim = estim,
+    r=r
+  )
+  
+  mod$sigmaForecast = sigmaForecast(mod)
+  return(mod)
+  
+}
+
+modResults = function(mod, main="", plot=T){
+  # print(rbind(estim = mod$estim, init = mod$init))
+  if (plot){
+    plot(mod$r, type="l", main=main)
+    lines(mod$sigmaForecast, col="cyan")
+  }
+}
+```
+
+
+
+# Tests
+```{r testFunction, options}
+testModel = function(mod){
+  n = mod$n
+  m = mod$m
+  p = mod$p
+  
+  alpha = mod$paramSim[1:(p+1)]
+  if (mod$q==0){beta = 0; q=1}
+  else{beta = mod$paramSim[-(1:(p+1))]; q = mod$q}
+  
+  r = numeric(n)
+  r[1:m] = rnorm(m)
+  sigma_sq = numeric(n)
+  sigma_sq[1:m] = sum(alpha*c(1,r[1:p]^2))
+  # sigma_sq[1:m] = alpha[1]/(1-sum(c(alpha, beta))) # GPT
+  
+  # browser()
+  for (t in (m + 1):n){
+    sigma_sq[t] = sum(alpha*c(1,r[(t-1):(t-p)]^2)) + sum(beta*sigma_sq[(t-1):(t-q)])
+    r[t] = rnorm(1, sd=sqrt(sigma_sq[t]))
+  }
+  # browser()
+  # estimation
+  estim = exp(optim(par = log(mod$init), fn = garchLL, r = r, p=p, q=q, method = "BFGS")$par)
+  comparison = (rbind(real = mod$paramSim, estim = estim, init = mod$init))
+  return(list(r = r, estim = estim, comparison = comparison))
+}
+
+
+```
+
+```{r arch1, options}
+set.seed(420)
+arch1 = list(
+  p = 1, 
+  q= 0,
+  m= 1,
+  n = 1e4,
+  init = rep(0.1,2),
+  paramSim = c(0.01, 0.2)
+)
+
+
+testResult = testModel(arch1)
+testResult$comparison
+
+# qqnorm(testResult$r)
+# plot(testResult$r)
+```
+
+```{r garch12, options}
+set.seed(420)
+garch12 = list(
+  p = 1, 
+  q= 2,
+  m= 2,
+  n = 1e4,
+  init = rep(0.1,4),
+  paramSim = c(0.01, 0.2, 0.1, 0.5)
+)
+
+
+testResult = testModel(garch12)
+garch12$estim = testResult$estim
+round(testResult$comparison,3)
+
+garch12$r = testResult$r
+garch12$sigmaForecast = sigmaForecast(garch12)
+plot(garch12$r, type = "l")
+lines(garch12$sigmaForecast, col="cyan")
+```
+
+# Real data (HOW YOU FIT IT AND VIEW IT)
+```{r loadData, options}
+df <- read.csv('projectdata.csv', header = T, sep=";", dec=",", stringsAsFactors=FALSE)
+
+
+# qqnorm(r)
+# plot(r, type = "l")
+```
+
+```{r garch, fig.height=7}
+# make data to fit
+fit = lm(Inflation~Unemployed+Consumption+InterestRate, data = df)
+r = df$Inflation - fit$fitted.values
+d = diff(df$Inflation)
+par(mfrow=c(2,1))
+# inflation - regression
+garch12regr = garch(r, p=1, q=2, init=rep(0.1, 1+2+1))
+modResults(garch12regr, main="garch(1,2) on regression")
+
+# diff inflation
+garch12 = garch(d, p=1, q=2, init=rep(0.1, 1+2+1))
+modResults(garch12, "garch(1,2) on diff")
+par(mfrow=c(1,1))
+```
+
+
+
+
+```{r arch, fig.height=9}
+par(mfrow=c(3,2))
+arch1regr = garch(r, p=1, q=0, init=rep(0.1, 2))
+modResults(arch1regr, main="arch(1) on inflation - regression")
+
+arch1d = garch(d, p=1, q=0, init=rep(0.1, 2))
+modResults(arch1d, main = "arch(1) on diff(inflation)")
+
+arch2regr = garch(r, p=2, q=0, init=rep(0.1, 3))
+modResults(arch2regr, main="arch(2) on inflation - regression")
+
+arch2d = garch(d, p=2, q=0, init=rep(0.1, 3))
+modResults(arch2d, "arch(2) on diff(inflation)")
+
+arch10regr = garch(r, p=10, q=0, init=rep(0.1, 11))
+modResults(arch10regr, main="arch(10) on inflation - regression")
+
+arch10d = garch(d, p=10, q=0, init=rep(0.1, 11))
+modResults(arch10d, "arch(10) on diff(inflation)")
+par(mfrow=c(1,1))
+
+list(
+arch1regr = arch1regr$estim,
+arch1d = arch1d$estim,
+arch2regr = arch2regr$estim,
+arch2d = arch2d$estim,
+arch10regr = arch10regr$estim,
+arch10d = arch10d$estim
+)
+
+```
+
+
+
+
+
+
+
