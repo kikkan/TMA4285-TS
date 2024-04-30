@@ -52,7 +52,7 @@ library(ggplot2)
 GARCH($p$, $q$) is given by
 \begin{align}
      r_t &= \sigma_t \epsilon_t, \label{eq:garchReturn}\\
-     \sigma^2_t &= \alpha_0 + \sum_{j=1}^p \alpha_j r_{t-j}^2 + \sum_{j=1}^q \beta_j \sigma_{t-j}^2. \label{eq:garchVar}
+     \sigma^2_t &= \alpha_0 + \sum_{j=1}^p \alpha_j r_{t-j}^2 + \sum_{j=1}^q \beta_j \sigma_{t-j}^2. \label{eq:garchVar} 
 \end{align}
 
 It can be shown that a GARCH($p$, $q$) admits a non-Gaussian ARMA($p$, $q$) for the squared process
@@ -235,23 +235,6 @@ critFunc = function(params, r, p=1, q=1){
   return(ll)
 }
 
-# r shifted ----
-# Shifting inflation since r (eq. 5.34) cannot have zeroes in the denominator.
-set.seed(420) # Why? don't ask me
-shift = min(df$Inflation - 0.1) # inflation seems to be discretized per 0.1
-inflationShifted = df$Inflation - shift
-r = diff(inflationShifted)/inflationShifted[1:(n-1)]
-
-# Test garch(1,2) ----
-alpha_init = c(0.1,0.1)
-beta_init = c(0.1,0.1)
-p = length(alpha_init)-1
-q = length(beta_init)
-loglike = critFunc(c(alpha_init, beta_init), r, p=p, q=q)
-opt = optim(par=c(alpha_init, beta_init), fn=critFunc, r=r, p=p, q=q)
-alpha = opt$par[1:(p+1)]
-beta = opt$par[(p+2):(1+p+q)]
-cbind(alpha, beta)
 
 # Sigma estimation ----
 sigmaForecast = function(alpha, beta, r){
@@ -261,6 +244,7 @@ sigmaForecast = function(alpha, beta, r){
   # r: vector of returns.
   
   p = length(alpha) - 1
+  if(is.null(beta)){beta=c(0)}
   q = length(beta)
   m = max(p,q)
   
@@ -274,9 +258,24 @@ sigmaForecast = function(alpha, beta, r){
   return(sigma)
 }
 
+# GARCH(p,q) function for ease of use
+garch = function(p, q, alpha, beta, r){
+  if (is.null(beta)){params=alpha}
+  else {params = c(alpha, beta)}
+  
+  params = optim(par=params, fn = critFunc, r=r, p=p, q=q, method = "BFGS")$par
+  sigma = sigmaForecast(alpha, beta, r)
+  
+  return(list(params = params, sigma = sigma))
+}
+
+infl = diff(df$Inflation)
+garch10 = garch(p=1,q=0, alpha = c(0.1,0.1), beta=NULL, r=infl)
+garch22 = garch(p=2,q=2, alpha = rep(0.5,3), beta=c(0.4,0.4), r=infl)
+plot(garch10$sigma - garch22$sigma)
 sigma_estim = sigmaForecast(alpha, beta, r)
 plot(r, type = 'l', )
-lines(sigma_estim[2:length(r)], col="cyan", lty=2)
+lines(sqrt(sigma_estim[2:length(r)]), col="cyan", lty=2)
 plot(df$Inflation, type = "l")
 ```
 
@@ -327,3 +326,51 @@ initParams = c(0.1,0.1,0.1,0.1,0.1)
 params = optim(par=c(0.1,0.1,0.1,0.1,0.1), fn=critFunc, r=returns, p=2, q=2, method = "BFGS")$par
 round(rbind(real = c(omega,alpha1,alpha2,beta1,beta2), estim = params, init = initParams),2)
 ```
+
+# Regression and GARCH
+What if
+\begin{equation}
+  x_t = \boldsymbol c^\top \boldsymbol z_t + y_t
+\end{equation}
+where $y_t$ is modelled as a GARCH, $\boldsymbol z_t$ are covariates and $\boldsymbol c$ is a vector of coeffs. to be estimated.
+```{r regrGARCH, options}
+fit = lm(Inflation~Unemployed+Consumption+InterestRate, data = df)
+
+plot(df$Inflation)
+lines(fit$fitted.values)
+qqnorm(df$Inflation - fit$fitted.values)
+```
+
+
+# Post help session
+Inflation is already relative stuff of CPI, so no rel diff of inflation is necessary. Therefore:
+```{r postHelp, options}
+p = 1; q=0
+infl = df$Inflation
+# initParams = c(0.1,0.1,0.1,0.1,0.1) # GARCH(2,2)
+initParams = c(0.5,0.5) # GARCH(1,0)
+params = optim(par=initParams, fn=critFunc, r=infl, p=p, q=q, method = "BFGS")$par
+alpha = params[1:(p+1)]
+beta = params[(p+2):(p+1+q)]
+sigma = sigmaForecast(alpha, c(0), infl)
+
+
+# Test
+plot(df$Inflation, type = "l")
+lines(sqrt(sigma_estim[2:length(r)]), col="cyan", lty=2)
+```
+
+```{r getParams, options}
+garch = function(p, q, alpha, beta, r){
+  if (is.null(beta)){params=alpha}
+  else {params = c(alpha, beta)}
+  
+  params = optim(params, fn = critFunc, r=r, p=p, q=q, method = "BFGS")$par
+  sigma = sigmaForecast(alpha, beta, r)
+  
+  return(list(params = params, sigma = sigma))
+}
+```
+
+
+
